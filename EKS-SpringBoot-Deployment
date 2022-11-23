@@ -1,0 +1,300 @@
+EKS Cluster Practical
+----------------------
+1. EC2 Boot up with Java, Maven and Jenkins
+Scripts:
+
+sudo hostnamectl set-hostname Jenkins
+
+sudo apt update
+
+sudo apt-get install default-jdk -y
+
+sudo apt install maven -y
+
+wget -q -O - https://pkg.jenkins.io/debian/jenkins.io.key | sudo apt-key add -
+
+echo deb http://pkg.jenkins.io/debian-stable binary/ | sudo tee /etc/apt/sources.list.d/jenkins.list
+
+sudo apt update
+
+sudo apt install jenkins -y
+
+After booting up you machine you can see the logs
+# tail -f /var/log/cloud-init-output.log
+
+2. Verify Java, Maven and Jenkins tools installed or not
+
+java -version
+
+mvn --version
+
+your ip address:8080
+
+Password:
+sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+
+3. Please proceed with Jenkins initial setup
+
+4. After the we need to install AWS CLI
+
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+
+sudo apt install unzip
+
+sudo unzip awscliv2.zip
+
+sudo ./aws/install
+
+aws --version
+
+5. Then we need to install eksctl
+
+Download and extract the latest release of eksctl with the following command.
+
+# curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+
+Move the extracted binary to /usr/local/bin.
+
+sudo mv /tmp/eksctl /usr/local/bin
+
+eksctl version
+
+6. Install kubectl
+
+sudo curl --silent --location -o /usr/local/bin/kubectl   https://s3.us-west-2.amazonaws.com/amazon-eks/1.22.6/2022-03-09/bin/linux/amd64/kubectl
+
+sudo chmod +x /usr/local/bin/kubectl
+
+kubectl version --short --client
+
+7. Setup IAM Role with Administrator Access Policy
+
+8. First let me switch to Jenkins User in my terminal, because Jenkins is the one where we are going to do deployment into EKS Cluster
+# sudo su - jenkins
+
+Create EKS Cluster with two worker nodes using eksctl
+
+# eksctl create cluster --name demo-eks-latest --region us-east-2 --nodegroup-name my-nodes --node-type t3.small --managed --nodes 2
+
+9. First Lets create a ECR Repository where we are going to push our docker image
+Search ECR in AWS say create repository -> Select private one -> name: my-repo
+
+Then lets install Docker into our machine.
+As EKS cluster is creating in one terminal, am going to open one more terminal for other installations. Be in ubuntu user and start installing Docker
+
+Open a new terminal
+Steps:
+Install docker
+# sudo apt install docker.io -y
+
+Add Ubuntu user to Docker group
+# sudo usermod -aG docker $USER
+
+By this command Ubuntu user can perform docker commands without sudo user, that’s the main reason to perform this command
+
+The Docker service needs to be setup to run at startup.
+# sudo systemctl start docker
+# sudo systemctl enable docker
+# sudo systemctl status docker
+
+After that we need to add jenkins users to the Docker group because Jenkins is going to perform the docker build
+Add ubuntu user to Docker group
+# sudo usermod -a -G docker jenkins
+
+After we do that we need to restart our Jenkins
+Restart Jenkins service
+# sudo service jenkins restart
+
+Reload system daemon files
+# sudo systemctl daemon-reload
+
+Restart Docker service as well
+# sudo service docker stop
+# sudo service docker start
+
+Now docker installed and running.
+
+10. Now we need to install the necessary plugins
+
+Manage Jenkins -> Manage Plugins ->  Available tab
+
+Plugin Name: Docker, Docker Pipeline and Kubernetes CLI plugin
+
+Then we need install some tools like Maven and Nodejs in jenkins
+
+As we have Java based Application, so to perform java build we need to install maven
+
+Open Docker file:
+Here we are going to build as a jar file and package it as a docker image
+
+I know we already install Maven but in jenkins we need to configure the variable
+Maven Tools: Global tool configuration -> Add Maven -> Maven3 -> /usr/share/maven -> apply -> save
+
+11. Until my EKS Cluster is getting ready in that mean while will create the Jenkins pipeline, build our project, generate docker image and push to ECR
+
+In Jenkins Click on new item
+Name: myKubenetesPipelineJob
+Then say ok
+Select the Hello World sample declarative Pipeline
+
+First we need to check out the code:
+You can see it pipeline syntax by filling required information
+
+stages {
+    stage('Code Checkout') {
+        steps {
+            checkout([$class: 'GitSCM', branches: [[name: '*/main']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: '', url: 'https://github.com/akannan1087/springboot-app']]])
+        }
+    }
+
+Run the pipeline check we are able to run or not before I go too far.
+
+12. Then we need to write Stage for Maven build
+First we need to define the Maven tool what we have installed
+
+tools {
+    maven 'Maven3'
+}
+
+Then we need to add it in stage
+stage ('Maven Build') {
+    steps {
+      sh 'mvn clean install'
+      }
+}
+
+Verify it before proceeding further
+
+13. Next we need to create the docker image
+Before that in our pipeline script we need to provide environment registry
+
+Copy the ECR Repo URL and Provide it in registry
+
+environment {
+    registry = "120761001082.dkr.ecr.us-east-2.amazonaws.com/my-repo"
+}
+
+Then create the stage for creating docker image
+
+stage('Building image') {
+   steps{
+    script {
+     dockerImage = docker.build registry
+      }
+   }
+}
+
+As here am going to use some scripts so am using script block
+Verify the stage by running the pipeline
+Check Docker image is created or not
+To verify in your machine say # docker images
+
+14. Now let’s create a stage for pushing Docker Image to ECR
+Here we need to use AWS CLI command
+
+Go to ECR in AWS
+Here will tell you trick, select your repo click on view push command copy the first command to connect to ECR
+
+Before writing the stage you can verify it in your terminal
+
+Paste the push command: # aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin account_id.dkr.ecr.us-east-2.amazonaws.com
+
+You will get Login Succeed message
+
+For pushing docker image to ECR command you can find in the 4th command
+
+docker push account_id.dkr.ecr.us-east-2.amazonaws.com/my-docker-repo:latest'
+
+
+stage('Pushing to ECR') {
+   steps{
+     script {
+        sh 'aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin account_id.dkr.ecr.us-east-2.amazonaws.com'
+        sh 'docker push account_id.dkr.ecr.us-east-2.amazonaws.com/my-docker-repo:latest'
+     }
+   }
+}
+
+verify the pipeline script by running the pipeline
+
+15. Now let’s check our Cluster is ready or not
+
+In your first terminal do the actions
+
+There are various way to check our cluster, lets verify with by using eksctl command
+
+# eksctl get cluster --name demo-eks --region us-east-2
+This going to tell you the details of your cluster, you can see our cluster is up and running
+
+You can see the above logs like
+Kubectl command should work with /var/lib/jenkins/.kube/config
+
+Basically the kubeconfig information has been under /var/lib/jenkins directory
+
+Then say
+# kubectl get nodes
+
+It will gives us two worker node, as we setup two worker nodes
+
+To know how many pods are running
+# kubectl get pods
+
+To know list of namespaces
+# kubectl get ns
+There are the list of default namespaces as part of the cluster
+
+Now to see the kubeconfig entry you can copy kubeconfig information has been under /var/lib/jenkins/.kube/config
+# cat /var/lib/jenkins/.kube/config
+
+Using this configuration Kubectl command is communicating to EKS Cluster
+Now let’s store this configuration to text file name it as kubeconfig-file
+Make sure you don’t miss anything from in that file
+
+16. Now let’s create credentials for connecting Kubernetes Cluster using kubeconfig
+In Jenkins
+Manage jenkins -> Manage Credentials -> Click on Global Credentials -> Add Credentials ->  Select kind as Secret File -> Choose your kubeconfig file -> Put any name to Id: K8s -> Description optional: K8S -> Click on ok
+Now our kubeconfig entry has been saved as a credential here
+
+Now go to pipeline say configure
+
+Let’s write the stage for deploying our microservice to Kubernetes Cluster
+
+Now lets generate the script, select pipeline syntax
+Remember we installed a plugin called  Kubernetes CLI plugin
+
+Select withKubeConfig: Configure Kubernetes CLI (kubectl)
+
+Then select the credential what we just created, then don’t provide anything’ then say Generate Pipeline Script
+Then Copy this command, ow lets create a new stage
+
+stage('K8S Deploy') {
+   steps{
+     script {
+        withKubeConfig([credentialsId: 'K8S', serverUrl: '']) {
+        sh ('kubectl apply -f  eks-deploy-k8s.yaml')
+        }
+     }
+   }
+}
+
+In your deployment manifest file use the correct docker image name
+In that deployment File we are creating 4 replica, mentioning my docker image name and exposing my service inform of Load balancer
+Then once I hit the load balancer I should able to access my spring boot app
+
+17. # kubectl get deployments
+
+# kubectl get pods
+
+# kubectl get services
+
+Copy the load balancer IP and use curl command
+# curl load balancer IP
+Use the IP in your browser to see your spring boot app.
+
+18 Delete the cluster
+
+eksctl delete cluster --name demo-eks-latest --region us-east-2
+
+
+
+
