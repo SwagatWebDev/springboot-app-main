@@ -2,24 +2,24 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app: springboot-app
-  name: springboot-app
+    app: springboot-app-latest
+  name: springboot-app-latest
 spec:
   replicas: 4
   selector:
     matchLabels:
-      app: springboot-app
+      app: springboot-app-latest
   template:
     metadata:
       labels:
-        app: springboot-app
+        app: springboot-app-latest
     spec:
       containers:
-      - name: my-springboot-app
+      - name: springboot-app-latest
         image: 120761001082.dkr.ecr.us-east-2.amazonaws.com/my-repo1
         imagePullPolicy: Always
         ports:
-        - containerPort: 8085
+        - containerPort: 8081
           name: http
           protocol: TCP
 # service type loadbalancer       
@@ -28,15 +28,15 @@ apiVersion: v1
 kind: Service
 metadata:
   labels:
-    app: springboot-app
-    k8s-app: springboot-app
-  name: springboot-app
+    app: springboot-app-latest
+    k8s-app: springboot-app-latest
+  name: springboot-app-latest
 spec:
   ports:
   - name: http
     port: 80
     protocol: TCP
-    targetPort: 8085
+    targetPort: 8081
   type: LoadBalancer
   selector:
     app: springboot-app
