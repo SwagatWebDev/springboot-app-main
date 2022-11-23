@@ -39,4 +39,4 @@ spec:
     targetPort: 8081
   type: LoadBalancer
   selector:
-    app: springboot-app
+    app: springboot-app-latest
